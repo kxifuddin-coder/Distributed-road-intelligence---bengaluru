@@ -353,7 +353,7 @@ export default function PotholeMap() {
                       const base64Img = canvas.toDataURL("image/jpeg", 0.7);
                       
                       try {
-                        const backendUrl = `http://${window.location.hostname}:8000/api/v1/detect/`;
+                        const backendUrl = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/detect/` : `http://${window.location.hostname}:8000/api/v1/detect/`;
                         const res = await fetch(backendUrl, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
