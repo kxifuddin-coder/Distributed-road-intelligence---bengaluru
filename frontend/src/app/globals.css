@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: #0e0e0e;
+  --color-bg-card: #181818;
+  --color-bg-card-hover: #1f1f1f;
+  --color-bg-elevated: #222222;
+  --color-bg-overlay: rgba(14, 14, 14, 0.85);
+
+  --color-text: #e5e2e1;
+  --color-text-muted: #8a9490;
+  --color-text-dim: #5a6462;
+
+  --color-border: #2a2d2c;
+  --color-border-subtle: #1e2120;
+
+  --color-teal: #2ec4b6;
+  --color-teal-dim: #1a7a70;
+  --color-teal-glow: rgba(46, 196, 182, 0.15);
+
+  --color-red: #ff6b6b;
+  --color-red-dim: #7a2020;
+  --color-red-glow: rgba(255, 107, 107, 0.15);
+
+  --color-orange: #ffb86b;
+  --color-orange-dim: #7a5a20;
+  --color-orange-glow: rgba(255, 184, 107, 0.15);
+
+  --color-green: #69db7c;
+  --color-green-dim: #1a5a2a;
+  --color-green-glow: rgba(105, 219, 124, 0.15);
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* Base */
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+.custom-scroll::-webkit-scrollbar { width: 4px; }
+.custom-scroll::-webkit-scrollbar-track { background: transparent; }
+.custom-scroll::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 4px; }
+.custom-scroll::-webkit-scrollbar-thumb:hover { background: var(--color-text-dim); }
+
+/* Pulse animation for active markers */
+@keyframes radar-ping {
+  0%   { box-shadow: 0 0 0 0 rgba(255,107,107,0.5); }
+  70%  { box-shadow: 0 0 0 12px rgba(255,107,107,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,107,107,0); }
+}
+.radar-ping { animation: radar-ping 2s ease-out infinite; }
+
+/* OpenLayers overrides */
+.ol-viewport { outline: none; }
+.ol-control { opacity: 0.4; }
+.ol-attribution { opacity: 0.4; }
+
+/* User Location Marker (Google blue puck) */
+.user-location-marker {
+  width: 32px;
+  height: 32px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.user-location-marker .dot {
+  width: 18px;
+  height: 18px;
+  background-color: #4285F4;
+  border: 3px solid white;
+  border-radius: 50%;
+  position: relative;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  z-index: 2;
+}
+.user-location-marker .pulse {
+  width: 48px;
+  height: 48px;
+  background-color: rgba(66, 133, 244, 0.3);
+  border-radius: 50%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation: pulse-ring 2.5s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
+  z-index: 1;
+}
+
+@keyframes pulse-ring {
+  0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+}
+
+.user-marker-overlay {
+  transition: transform 1s linear !important;
+}
+
+
+/* ═══ Neumorphic Design System ═══ */
+
+/* Raised / floating card — clean single-direction shadow, no white shine */
+.neu-flat {
+  background: #f0f0f3;
+  box-shadow: 4px 6px 16px rgba(180, 180, 190, 0.5);
+}
+.neu-flat-sm {
+  background: #f0f0f3;
+  box-shadow: 2px 4px 10px rgba(180, 180, 190, 0.45);
+}
+.neu-flat-lg {
+  background: #f0f0f3;
+  box-shadow: 6px 10px 28px rgba(170, 170, 182, 0.45);
+}
+
+/* Pressed-in / inset — used for selected/active state */
+.neu-inset {
+  background: #f0f0f3;
+  box-shadow: inset 3px 3px 7px rgba(180, 180, 190, 0.5);
+}
+.neu-inset-deep {
+  background: #ededf0;
+  box-shadow: inset 4px 4px 10px rgba(180, 180, 190, 0.5);
+}
+
+/* Interactive button — raised by default, pressed on :active */
+.neu-button {
+  background: #f0f0f3;
+  box-shadow: 4px 6px 16px rgba(180, 180, 190, 0.5);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.neu-button:active {
+  box-shadow: inset 3px 3px 6px rgba(180, 180, 190, 0.5);
+}
+
+/* Primary accent button */
+.neu-button-primary {
+  background: #3b82f6;
+  box-shadow: 6px 6px 16px rgba(59, 130, 246, 0.35), -5px -5px 14px rgba(255,255,255,0.7);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.neu-button-primary:hover {
+  background: #2563eb;
+  box-shadow: 4px 4px 10px rgba(59, 130, 246, 0.4), -4px -4px 10px rgba(255,255,255,0.7);
+}
+.neu-button-primary:active {
+  box-shadow: inset 3px 3px 6px rgba(0, 0, 0, 0.25);
+}
