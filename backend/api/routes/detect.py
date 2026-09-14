@@ -5,21 +5,6 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import os
-import torch
-torch.set_num_threads(1)
-
-try:
-    from ultralytics import YOLO
-    
-    # Check if model exists
-    model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "best.pt")
-    if os.path.exists(model_path):
-        model = YOLO(model_path)
-    else:
-        print(f"Model not found at {model_path}")
-        model = None
-except ImportError:
-    model = None
 
 router = APIRouter()
 
@@ -29,17 +14,24 @@ class DetectRequest(BaseModel):
     longitude: Optional[float] = None
     save_image: bool = False
 
-# Create uploads dir if not exists
 UPLOADS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "best.onnx")
+if os.path.exists(model_path):
+    # This reads the ONNX model without any PyTorch dependencies! 
+    # Massive memory reduction for Render free tier.
+    net = cv2.dnn.readNetFromONNX(model_path)
+else:
+    print(f"ONNX Model not found at {model_path}")
+    net = None
+
 @router.post("/", response_model=Dict[str, Any])
 def detect_potholes(req: DetectRequest):
-    if model is None:
-        raise HTTPException(status_code=503, detail="YOLO Model not loaded or dependencies missing")
+    if net is None:
+        raise HTTPException(status_code=503, detail="ONNX YOLO Model not loaded")
         
     try:
-        # Decode base64 image
         img_data = base64.b64decode(req.image_base64.split(",")[1] if "," in req.image_base64 else req.image_base64)
         nparr = np.frombuffer(img_data, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -47,37 +39,61 @@ def detect_potholes(req: DetectRequest):
         if img is None:
             raise HTTPException(status_code=400, detail="Invalid image data")
             
-        # Run YOLO inference
-        results = model(img, conf=0.35) # Use low confidence to catch as many as possible
+        orig_h, orig_w = img.shape[:2]
+        
+        # YOLOv8 ONNX inference via OpenCV (No PyTorch overhead!)
+        blob = cv2.dnn.blobFromImage(img, 1/255.0, (640, 640), swapRB=True, crop=False)
+        net.setInput(blob)
+        preds = net.forward()
+        
+        # Output shape: (1, 5, 8400) -> 5 values are [xc, yc, w, h, confidence]
+        preds = np.squeeze(preds, axis=0) # (5, 8400)
+        preds = preds.T # (8400, 5)
+        
+        # Filter by confidence
+        scores = preds[:, 4]
+        mask = scores > 0.35
+        filtered_preds = preds[mask]
+        filtered_scores = scores[mask]
         
         boxes_out = []
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                # get box coordinates in (top, left, bottom, right) format
-                b = box.xyxy[0].tolist()
-                c = box.conf[0].item()
-                # x, y, width, height format
-                boxes_out.append({
-                    "x": b[0],
-                    "y": b[1],
-                    "w": b[2] - b[0],
-                    "h": b[3] - b[1],
-                    "conf": c
-                })
+        if len(filtered_preds) > 0:
+            boxes = filtered_preds[:, :4]
+            x_factor = orig_w / 640.0
+            y_factor = orig_h / 640.0
+            
+            nms_boxes = []
+            for i in range(len(boxes)):
+                xc, yc, w, h = boxes[i]
+                left = (xc - w/2) * x_factor
+                top = (yc - h/2) * y_factor
+                width = w * x_factor
+                height = h * y_factor
+                nms_boxes.append([int(left), int(top), int(width), int(height)])
+                
+            indices = cv2.dnn.NMSBoxes(nms_boxes, filtered_scores.tolist(), 0.35, 0.45)
+            
+            if len(indices) > 0:
+                for i in indices.flatten():
+                    box = nms_boxes[i]
+                    # return exact format frontend expects
+                    boxes_out.append({
+                        "x": box[0],
+                        "y": box[1],
+                        "w": box[2],
+                        "h": box[3],
+                        "conf": float(filtered_scores[i])
+                    })
         
-        # 1km Image Saving Logic (only save 1 representative image per ~1.1km grid)
+        # 1km Image Saving Logic
         saved_image = False
         if req.save_image and req.latitude is not None and req.longitude is not None and len(boxes_out) > 0:
-            # Rounding to 2 decimal places is roughly 1.1km
             grid_lat = round(req.latitude, 2)
             grid_lon = round(req.longitude, 2)
             img_filename = f"grid_{grid_lat}_{grid_lon}.jpg"
             img_path = os.path.join(UPLOADS_DIR, img_filename)
             
-            # If no photo exists for this grid, save it
             if not os.path.exists(img_path):
-                # Save the image with bounding boxes drawn for context
                 img_to_save = img.copy()
                 for box in boxes_out:
                     cv2.rectangle(img_to_save, (int(box["x"]), int(box["y"])), 
