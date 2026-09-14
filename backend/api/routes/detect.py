@@ -5,6 +5,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import os
+import torch
+torch.set_num_threads(1)
 
 try:
     from ultralytics import YOLO
