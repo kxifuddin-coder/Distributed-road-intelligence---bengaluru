@@ -13,7 +13,7 @@ frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url, "http://localhost:3000"], 
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],  
     allow_headers=["*"],  
@@ -23,7 +23,7 @@ app.add_middleware(
 def root():
     return {"message": "Welcome to DRIS API"}
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "active", "service": "DRIS API", "timestamp": "ok"}
 
