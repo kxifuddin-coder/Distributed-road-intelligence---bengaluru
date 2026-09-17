@@ -1,9 +1,11 @@
 import base64
 import cv2
+import gc
 import numpy as np
+import onnxruntime as ort
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 import os
 
 router = APIRouter()
@@ -17,18 +19,24 @@ class DetectRequest(BaseModel):
 UPLOADS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+# Load FP16 ONNX model at startup using onnxruntime.
+# onnxruntime fully supports FP16, unlike cv2.dnn.
+# Single-threaded to minimize memory on Render free tier.
 model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "best.onnx")
 if os.path.exists(model_path):
-    # This reads the ONNX model without any PyTorch dependencies! 
-    # Massive memory reduction for Render free tier.
-    net = cv2.dnn.readNetFromONNX(model_path)
+    _sess_opts = ort.SessionOptions()
+    _sess_opts.intra_op_num_threads = 1
+    _sess_opts.inter_op_num_threads = 1
+    sess = ort.InferenceSession(model_path, _sess_opts, providers=["CPUExecutionProvider"])
+    input_name = sess.get_inputs()[0].name
 else:
     print(f"ONNX Model not found at {model_path}")
-    net = None
+    sess = None
+    input_name = None
 
 @router.post("/", response_model=Dict[str, Any])
 def detect_potholes(req: DetectRequest):
-    if net is None:
+    if sess is None:
         raise HTTPException(status_code=503, detail="ONNX YOLO Model not loaded")
         
     try:
@@ -38,45 +46,42 @@ def detect_potholes(req: DetectRequest):
         
         if img is None:
             raise HTTPException(status_code=400, detail="Invalid image data")
-            
-        orig_h, orig_w = img.shape[:2]
-        
-        # YOLOv8 ONNX inference via OpenCV (No PyTorch overhead!)
-        blob = cv2.dnn.blobFromImage(img, 1/255.0, (640, 640), swapRB=True, crop=False)
-        net.setInput(blob)
-        preds = net.forward()
-        
+
+        # Layer 2: Resize immediately to 640x640 so the inference step
+        # doesn't hold both the large original image AND the resized blob
+        # in memory simultaneously (~30MB peak RAM saving on phone images).
+        img = cv2.resize(img, (640, 640))
+
+        # Prepare input tensor: BGR->RGB, HWC->CHW, normalize, add batch
+        blob = img.astype(np.float32) / 255.0
+        blob = blob[:, :, ::-1]              # BGR -> RGB
+        blob = np.transpose(blob, (2, 0, 1)) # HWC -> CHW
+        blob = np.expand_dims(blob, 0)       # (1, 3, 640, 640)
+
+        # Run FP16 ONNX inference via onnxruntime
+        preds = sess.run(None, {input_name: blob})[0]
+
         # Output shape: (1, 5, 8400) -> 5 values are [xc, yc, w, h, confidence]
-        preds = np.squeeze(preds, axis=0) # (5, 8400)
-        preds = preds.T # (8400, 5)
-        
+        preds = np.squeeze(preds, axis=0).T  # (8400, 5)
+
         # Filter by confidence
         scores = preds[:, 4]
         mask = scores > 0.35
         filtered_preds = preds[mask]
         filtered_scores = scores[mask]
-        
+
         boxes_out = []
         if len(filtered_preds) > 0:
-            boxes = filtered_preds[:, :4]
-            x_factor = orig_w / 640.0
-            y_factor = orig_h / 640.0
-            
             nms_boxes = []
-            for i in range(len(boxes)):
-                xc, yc, w, h = boxes[i]
-                left = (xc - w/2) * x_factor
-                top = (yc - h/2) * y_factor
-                width = w * x_factor
-                height = h * y_factor
-                nms_boxes.append([int(left), int(top), int(width), int(height)])
-                
+            for row in filtered_preds:
+                xc, yc, w, h = row[:4]
+                nms_boxes.append([int(xc - w/2), int(yc - h/2), int(w), int(h)])
+
             indices = cv2.dnn.NMSBoxes(nms_boxes, filtered_scores.tolist(), 0.35, 0.45)
-            
+
             if len(indices) > 0:
                 for i in indices.flatten():
                     box = nms_boxes[i]
-                    # return exact format frontend expects
                     boxes_out.append({
                         "x": box[0],
                         "y": box[1],
@@ -102,6 +107,9 @@ def detect_potholes(req: DetectRequest):
                 cv2.imwrite(img_path, img_to_save)
                 saved_image = True
                 
+        # Layer 4: Explicit GC after each inference — prevents memory
+        # fragmentation buildup on long-running Render free-tier servers.
+        gc.collect()
         return {"status": "success", "boxes": boxes_out, "saved_image": saved_image}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -9,3 +9,4 @@ httpx
 geopy
 opencv-python-headless
 numpy
+onnxruntime
