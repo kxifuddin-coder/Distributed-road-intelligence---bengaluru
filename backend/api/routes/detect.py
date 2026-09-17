@@ -27,6 +27,11 @@ if os.path.exists(model_path):
     _sess_opts = ort.SessionOptions()
     _sess_opts.intra_op_num_threads = 1
     _sess_opts.inter_op_num_threads = 1
+    # Disable pre-allocated memory arena and pattern optimization.
+    # ORT holds these in the cgroup even when idle, pushing us over
+    # Render's 512MB cgroup limit despite low process RSS. ~130MB saved.
+    _sess_opts.enable_cpu_mem_arena = False
+    _sess_opts.enable_mem_pattern = False
     sess = ort.InferenceSession(model_path, _sess_opts, providers=["CPUExecutionProvider"])
     input_name = sess.get_inputs()[0].name
 else:
